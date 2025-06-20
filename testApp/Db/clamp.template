@@ -1,0 +1,19 @@
+record(calcout, "$(P)ClampExp") {
+    field(INPA, "$(P)AcquireTime_RBV")
+    field(INPB, "$(P)AcquirePeriod_RBV CP")
+    field(OUT,  "$(P)AcquireTime PP")
+    field(DOPT, "Use OCAL")
+    field(OOPT, "When Non-zero")
+    field(CALC, "B < A")
+    field(OCAL, "B")
+}
+
+record(calcout, "$(P)ClampPer") {
+    field(INPA, "$(P)AcquireTime_RBV CP")
+    field(INPB, "$(P)AcquirePeriod_RBV")
+    field(OUT,  "$(P)AcquirePeriod PP")
+    field(DOPT, "Use OCAL")
+    field(OOPT, "When Non-zero")
+    field(CALC, "A > B")
+    field(OCAL, "A")
+}

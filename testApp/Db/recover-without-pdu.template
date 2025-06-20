@@ -1,0 +1,2 @@
+substitute "OUTPUT=RECOVER"
+include "recovery.template"

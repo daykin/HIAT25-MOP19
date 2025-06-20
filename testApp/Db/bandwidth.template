@@ -1,0 +1,50 @@
+record(ai, "$(P)$(IMG)BandwidthLim") {
+    field(VAL, "$(LIMIT=100e6)")
+    field(EGU, "bps")
+    info(autosaveFields, "VAL")
+}
+
+record(calc, "$(P)$(IMG)Bandwidth_RBV") {
+    field(EGU,  "bps")
+    field(INPA, "$(P)$(CAM)DataType_RBV CP")
+    field(INPB, "$(P)$(IMG)ArraySize0_RBV CP")
+    field(INPC, "$(P)$(IMG)ArraySize1_RBV CP")
+    field(INPD, "$(P)$(CAM)AcquirePeriod_RBV CP")
+    field(CALC, "((A==0)?1:2)*B*C*8/D")
+}
+
+record(calcout, "$(P)$(IMG)Bandwidth") {
+    field(EGU,  "bps")
+    field(OUT,  "$(P)$(CAM)AcquirePeriod PP")
+    field(INPA, "$(P)$(CAM)DataType_RBV CP")
+    field(INPB, "$(P)$(IMG)ArraySize0_RBV CP")
+    field(INPC, "$(P)$(IMG)ArraySize1_RBV CP")
+    field(INPD, "$(P)$(IMG)BandwidthLim CP")
+    field(INPE, "$(P)$(IMG)Bandwidth_RBV CP")
+    field(CALC, "D != 0 && E > D")
+    field(OOPT, "When Non-zero")
+    field(DOPT, "Use OCAL")
+    field(OCAL, "((A==0)?1:2)*B*C*8/D")
+}
+
+record(calc, "$(P)$(IMG)BandwidthPct_RBV") {
+    field(EGU,  "%")
+    field(HOPR, "100")
+    field(LOPR, "0")
+    field(INPA, "$(P)$(IMG)Bandwidth_RBV CP")
+    field(INPB, "$(P)$(IMG)BandwidthLim CP")
+    field(CALC, "A*100/B")
+}
+
+#if image queue is blowing up, try to back off acquire period
+record(calcout, "$(P)underRunRateLimit"){
+  field(SCAN, "1 second")
+  field(INPA, "$(P)$(CAM)NumQueuedArrays NPP")
+  field(INPB, "$(P)$(CAM)AcquirePeriod_RBV NPP")
+  field(CALC, "A>20")
+  field(OCAL, "B*1.1")
+  field(DOPT, "Use OCAL")
+  field(OOPT, "When Non-zero")
+  field(OUT, "$(P)$(CAM)AcquirePeriod PP")
+}
+

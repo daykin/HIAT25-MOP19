@@ -1,0 +1,32 @@
+substitute "OUTPUT=TRIGGER_PDU_RESTART"
+include "recovery.template"
+
+record(bo, "_$(P)TRIGGER_PDU_RESTART"){
+    field(VAL, "0")
+    field(PINI, "YES")
+}
+
+record(stringin, "$(P)PDU_RESTART_STATUS"){
+}
+
+record(calcout, "_$(P)PDU_IS_OFF"){
+    field(FLNK, "$(P)TIME_SINCE_OFF")
+}
+
+record(calcout, "$(P)TIME_SINCE_OFF"){
+    field(INPA, "_$(P)PDU_IS_OFF NPP NMS")
+    field(CALC, "A?VAL+1:0")
+    field(SCAN, "1 second")
+    field(FLNK, "_$(P)WAIT_FOR_ON")
+}
+
+record(calcout, "_$(P)PDU_OFF_WAIT_TIME"){
+    field(INPA, "$(P)NUM_RETRIES CPP MS")
+    field(CALC, "5+(MIN(60, 2^A))")
+}
+
+record(calc, "_$(P)WAIT_FOR_ON"){
+    field(INPA, "$(P)TIME_SINCE_OFF NPP NMS")
+    field(INPB, "_$(P)PDU_OFF_WAIT_TIME NPP NMS")
+    field(CALC, "A<B && A>0")
+}

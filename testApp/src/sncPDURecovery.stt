@@ -1,0 +1,220 @@
+
+program sncPDURecovery
+
+option +r;
+
+foreign ssId;
+
+int outletState;
+assign outletState to "{PDU}ON_RSTS_OUT{O}";
+monitor outletState;
+
+int outletOn;
+assign outletOn to "{PDU}ON_CMD_OUT{O}";
+
+int outletOff;
+assign outletOff to "{PDU}OFF_CMD_OUT{O}";
+
+int outletIsOffSignal;
+assign outletIsOffSignal to "_{CAM}PDU_IS_OFF";
+
+int cycleDelay;
+assign cycleDelay to "_{CAM}PDU_OFF_WAIT_TIME";
+monitor cycleDelay;
+
+int triggerPV;
+assign triggerPV to "_{CAM}TRIGGER_PDU_RESTART";
+monitor triggerPV;
+
+int numRetries;
+assign numRetries to "{CAM}NUM_RETRIES";
+monitor numRetries;
+
+int waitForOn;
+assign waitForOn to "_{CAM}WAIT_FOR_ON";
+monitor waitForOn;
+
+int recover;
+assign recover to "_{CAM}RECOVER";
+
+int retrying;
+assign retrying to "{CAM}RETRYING";
+monitor retrying;
+
+int camDisconnected;
+assign camDisconnected to "{CAM}CAM_DISCONNECTED";
+monitor camDisconnected;
+
+int framerate_watchdog;
+assign framerate_watchdog to "{CAM}FRAMERATE_WATCHDOG";
+
+int acquire;
+assign acquire to "{CAM}cam1:Acquire";
+monitor acquire;
+
+float acquirePeriod;
+assign acquirePeriod to "{CAM}cam1:AcquirePeriod_RBV";
+monitor acquirePeriod;
+
+float arrayRate;
+assign arrayRate to "{CAM}cam1:ArrayRate_RBV";
+monitor arrayRate;
+
+int framesCompleted;
+assign framesCompleted to "{CAM}cam1:ARFramesCompleted";
+monitor framesCompleted;
+
+int prevAcqState = 0;
+int triedToPowerCycle = 0;
+
+string fsmStatus;
+assign fsmStatus to "{CAM}PDU_RESTART_STATUS";
+
+ss sncPDURecovery{
+   state idle {
+      entry{
+        sprintf(fsmStatus, "Idle");
+        pvPut(fsmStatus, SYNC);
+      }
+      //outlet is on, and the camera died, and backoff has elapsed
+      when(triggerPV && outletState == 2){
+        numRetries += 1;
+        pvPut(numRetries, SYNC);
+        triggerPV = 0;
+        pvPut(triggerPV, SYNC);
+        prevAcqState = acquire;
+        recover = 1;
+        pvPut(recover);
+      } state tryReset 
+      //outlet is off, and the camera died, and backoff has elapsed
+      when(triggerPV && outletState == 1){
+        numRetries += 1;
+        triedToPowerCycle = 1;
+        pvPut(numRetries, SYNC);
+        outletOn = 1;
+        pvPut(outletOn, SYNC);
+        triggerPV = 0;
+        pvPut(triggerPV, SYNC);
+      } state waitForOn
+   }
+
+   state tryReset{
+    entry{
+      sprintf(fsmStatus, "Try to reset");
+      pvPut(fsmStatus, SYNC);
+    }
+    //tried to reset and still broken. Power cycle the camera
+    when(retrying==0 && camDisconnected==1 && numRetries <= 10){
+        triedToPowerCycle = 1;
+        retrying = 1;
+        pvPut(retrying, SYNC);
+        outletOff = 1;
+        pvPut(outletOff, SYNC);
+        triggerPV = 0;
+        pvPut(triggerPV, SYNC);
+    } state waitForOff
+    //reset ostensibly succeeded, Try to acquire
+    when(retrying==0 && camDisconnected==0){
+      acquire = 1;
+      pvPut(acquire);
+    } state tryAcquire
+    //we've tried power cycling 11 times, assume camera is gone.
+    //poll 'reset' every 30s for when it comes back online
+    when(retrying==0 && camDisconnected==1 && numRetries > 10){
+        sprintf(fsmStatus, "PDU rec failed; reset only");
+        pvPut(fsmStatus, SYNC);
+    } state idle
+   }
+
+   state waitForOff {
+     entry{
+        sprintf(fsmStatus, "Wait for PDU to turn off");
+        pvPut(fsmStatus, SYNC);
+     }
+     //outlet somehow didn't turn off
+     when(delay(30) && outletState != 1){
+        outletOff = 1;
+        pvPut(outletOff, SYNC);
+     } state waitForOff
+     //outlet is off
+     when(outletState == 1) {
+       outletIsOffSignal = 1;
+       pvPut(outletIsOffSignal, SYNC);
+     } state delayBeforeOn
+   }
+
+   state delayBeforeOn{
+     entry{
+        sprintf(fsmStatus, "Wait %d seconds before restart", cycleDelay);
+        pvPut(fsmStatus, SYNC);
+     }
+   //re-enable outlet after back-off time (in case of really bad volatile memory persistence on device)
+   when(delay(1) && waitForOn == 0){
+        outletOn = 1;
+        pvPut(outletOn,SYNC);
+        framerate_watchdog = 1;
+        pvPut(framerate_watchdog, SYNC);
+     } state waitForOn
+   }
+
+   state waitForOn {
+     entry{
+        sprintf(fsmStatus, "Wait for PDU to turn on");
+        pvPut(fsmStatus, SYNC);
+     }
+     //outlet is back on, reset the camera and wait for completion
+     when(outletState == 2) {
+        outletIsOffSignal = 0;
+        pvPut(outletIsOffSignal, SYNC);
+        recover = 1;
+        pvPut(recover);
+     } state waitForRecover
+   }
+
+   state waitForRecover {
+     entry{
+        sprintf(fsmStatus, "Wait for recovery after P/C");
+        pvPut(fsmStatus, SYNC);
+     }
+     //recovery ostensibly worked, try to acquire some frames
+     when(retrying==0 && !camDisconnected) {
+	acquire = 1;
+        pvPut(acquire);
+     } state tryAcquire
+     //power cycling didn't help, hand control back to database
+     when(retrying==0 && camDisconnected) {
+     } state idle
+   }
+
+  state tryAcquire{
+    entry{
+      sprintf(fsmStatus, "Try acquiring after reset");
+      pvPut(fsmStatus, SYNC);
+    }
+    //hooray, it worked
+    when(arrayRate > 0.01 && framesCompleted > 1){
+      triedToPowerCycle = 0;
+      acquire = prevAcqState;
+      pvPut(acquire);
+      numRetries = 0;
+      pvPut(numRetries, SYNC);
+    } state idle
+    //send control back to waitForOff/tryReset if we still can't acquire and haven't arrived here from a power-cycle
+    when(delay(10) && (arrayRate <= 0.01||framesCompleted<=1) && !triedToPowerCycle && numRetries <= 10){
+      framerate_watchdog = 0;
+      pvPut(framerate_watchdog, SYNC);
+      retrying = 1;
+      pvPut(retrying, SYNC);
+      outletOff = 1;
+      pvPut(outletOff, SYNC);
+      triggerPV = 0;
+      pvPut(triggerPV, SYNC);
+    } state waitForOff
+    //if we arrived from a power-cycle or >10 retries, hand control back to database processing
+    when(delay(10) && (arrayRate <= 0.01||framesCompleted<=1) && (triedToPowerCycle||numRetries > 10)){
+      framerate_watchdog = 0;
+      pvPut(framerate_watchdog, SYNC);
+    } state idle
+  }
+}
+

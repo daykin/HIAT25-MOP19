@@ -1,0 +1,4 @@
+file "configMenu.req", P=$(P), CONFIG=$(CONFIG)
+file "configMenu_settings.req", P=$(P), CONFIG=$(CONFIG)
+file "aravisCamera_settings.req", P=$(P), R=cam1:
+

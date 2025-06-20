@@ -1,0 +1,167 @@
+record(calcout, "$(P)SCAN_WHEN_NOT_ACQUIRING"){
+    field(SCAN, "1 second")
+    field(INPA, "$(P)$(R)AcquireBusy NPP MS")
+    field(CALC, "A")
+    field(OCAL, "1")
+    field(DOPT, "Use OCAL")
+    field(OOPT, "When Zero")
+    field(OUT, "$(P)MOCK_FRAME_COUNT.PROC CA")
+}
+
+record(longout, "$(P)DUMMY_BAD_FRAMECOUNT"){
+    field(VAL, "0")
+}
+
+record(bo, "$(P)MOCK_BAD_ACQ"){
+    field(PINI, "YES")
+    field(VAL, "0")
+    field(ZNAM, "Normal")
+    field(ONAM, "Mock")
+}
+
+record(calcout, "$(P)MOCK_FRAME_COUNT"){
+    field(INPA, "$(P)MOCK_BAD_ACQ CPP MS")
+    field(INPB, "$(P)$(R)NumImagesCounter_RBV CPP MS")
+    field(INPC, "$(P)$(R)AcquireBusy NPP MS")
+    field(CALC, "A")
+    field(OCAL, "C?B:1")
+    field(DOPT, "Use OCAL")
+    field(OOPT, "When Zero")
+    field(OUT, "_$(P)FRAMERATE_WATCHDOG.PROC")
+}
+
+#If we already know it's disconnected, spit out 0
+#Otherwise, infer 'frozen' state by lack of frames coming in
+record(calcout, "_$(P)FRAMERATE_WATCHDOG"){
+    field(INPA, "$(P)$(R)AcquireBusy NPP MS")
+    field(INPB, "$(P)MOCK_FRAME_COUNT NPP MS")
+    field(INPC, "$(P)$(R)ARCheckConnection CPP NMS")
+    field(CALC, "A?B:0")
+    field(OCAL, "1")
+    field(DOPT, "Use OCAL")
+    field(OOPT, "Every Time")
+    field(OUT, "$(P)FRAMERATE_WATCHDOG CA")
+}
+
+#If we're trying to acquire and don't receive a frame in >5min, assume the camera died.
+record(bo, "$(P)FRAMERATE_WATCHDOG"){
+    field(HIGH, "300")
+    field(ZNAM, "Dead")
+    field(ONAM, "Alive")
+    field(PINI, "YES")
+    field(TPRO, "0")
+}
+
+record(calcout, "$(P)CAM_DISCONNECTED"){
+    field(INPA, "$(P)$(R)ARCheckConnection CPP NMS")
+    field(INPB, "$(P)TRIGGER_RETRY.DISA CPP NMS")
+    field(INPC, "$(P)FRAMERATE_WATCHDOG CPP MS")
+    field(INPD, "$(P)RETRYING")
+    field(CALC, "(!A||!C) && !B && !D")
+    field(TPRO, "1")
+}
+
+#controlled by the state machine
+#When it increments, set 'retrying' high
+record(longout, "$(P)NUM_RETRIES"){
+    field(FLNK, "$(P)RETRY_WAIT_TIME")
+    field(TPRO, "1")
+    field(OUT, "$(P)TOGGLE_RETRYING.PROC")
+}
+
+record(calcout, "$(P)TOGGLE_RETRYING"){
+    field(INPA, "$(P)NUM_RETRIES NPP NMS")
+    field(CALC, "A")
+    field(OCAL, "1")
+    field(OOPT, "When Non-zero")
+    field(DOPT, "Use OCAL")
+    field(OUT, "$(P)RETRYING PP")
+}
+
+#Set when FSM kicks in, reset when state machine goes to idle
+record(bo, "$(P)RETRYING"){
+    field(ZNAM, "Idle")
+    field(ONAM, "Retry")
+    field(FLNK, "$(P)SECONDS_SINCE_RETRY")
+    field(TPRO, "1")
+}
+
+#If more than 10 retries, assume camera is gone,
+# so just try resetting every 30s until it's back
+record(calcout, "$(P)RETRY_WAIT_TIME"){
+    field(INPA, "$(P)NUM_RETRIES NPP NMS")
+    field(CALC, "A>10?30:20 + MIN(300-20, 2^A)")
+    field(PINI, "YES")
+    field(TPRO, "1")
+    field(FLNK, "$(P)DONT_RESTART_PDU")
+}
+
+record(calcout, "$(P)SECONDS_SINCE_RETRY"){
+    field(INPA, "$(P)CAM_DISCONNECTED NPP NMS")
+    field(INPB, "$(P)RETRYING NPP NMS")
+    field(CALC, "(B||!A)?0:VAL+1")
+    field(SCAN, "1 second")
+    field(FLNK, "$(P)TRIGGER_RETRY")
+}
+
+record(calcout, "$(P)TRIGGER_RETRY"){
+    field(INPA, "$(P)RETRY_WAIT_TIME NPP NMS")
+    field(INPB, "$(P)SECONDS_SINCE_RETRY NPP NMS")
+    field(INPC, "$(P)NUM_RETRIES NPP NMS")
+    field(INPD, "$(P)CAM_DISCONNECTED NPP NMS")
+    field(INPE, "$(P)RETRYING NPP NMS")
+    field(DISA, "1")
+    field(CALC, "(A==B || (C==0 && D)) && !E")
+    field(OOPT, "Transition To Non-zero")
+    field(PINI, "YES")
+    field(OUT, "_$(P)$(OUTPUT) PP")
+    info(autosaveFields, "DISA")
+}
+
+record(fanout, "_$(P)RECOVER"){
+    field(SELL, "$(P)$(R)AcquireBusy NMS")
+    field(SELM, "Specified")
+    field(LNK0, "$(P)RECOVER_NO_ACQUIRE")
+    field(LNK1, "$(P)RECOVER_AND_ACQUIRE")
+    field(FLNK, "$(P)NUM_RETRIES")
+    field(TPRO, "1")
+}
+
+#Save current settings
+#Wait
+#Reset Camera
+#Wait
+#Load settings again
+#Wait
+#Start Acquisition, if we were acquiring
+record(seq, "$(P)RECOVER_NO_ACQUIRE"){
+    field(SELM, "All")
+    field(DLY0, "3.0")
+    field(DO0, "1")
+    field(LNK0, "$(P)$(R)ARResetCamera PP")
+    field(DLY1, "7.0")
+    field(DO1, "1")
+    field(LNK1, "$(P)$(CONFIG)Menu:loadConfig1.PROC")
+    field(DLY2, "7.0")
+    field(DO2, "0")
+    field(LNK2, "$(P)RETRYING PP")
+}
+
+record(seq, "$(P)RECOVER_AND_ACQUIRE"){
+    field(SELM, "All")
+    field(DO0, "0")
+    field(DLY0, "5.0")
+    field(LNK0, "$(P)$(R)Acquire")
+    field(DLY1, "3.0")
+    field(DO1, "1")
+    field(LNK1, "$(P)$(R)ARResetCamera PP")
+    field(DLY2, "7.0")
+    field(DO2, "1")
+    field(LNK2, "$(P)$(CONFIG)Menu:loadConfig1.PROC")
+    field(DLY3, "7.0")
+    field(DO3, "1")
+    field(LNK3, "$(P)$(R)Acquire")
+    field(DO4, "0")
+    field(DLY4, "3.0")
+    field(LNK4, "$(P)RETRYING PP")
+}

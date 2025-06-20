@@ -1,0 +1,5 @@
+record(ai, "$(P)$(PVNAME)") {
+    field(EGU, "$(EGU)")
+    field(ASG, "DIAG_OPS")
+    info(autosaveFields, "VAL PREC")
+}
