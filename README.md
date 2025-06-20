@@ -14,7 +14,7 @@ Requirements:
 
 - [ADGenICam](https://github.com/areaDetector/ADGenICam)
 
-- [ADAravis] (https://github.com/areaDetector/ADAravis)
+- [ADAravis](https://github.com/areaDetector/ADAravis)
 
 This is an example, and will need to be tailored to your site-specific setup.
 
